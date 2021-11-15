@@ -1,6 +1,5 @@
 [workspace]
-#members = ["packages/*", "contracts/*"]
-members = ["packages/*"]
+members = ["packages/*", "contracts/*"]
 
 [profile.release.package.wynd-oracle]
 codegen-units = 1
