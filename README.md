@@ -21,3 +21,16 @@ Then go up, commit Cargo.lock and add a line to the CI file, copying like the ot
 ```shell
 git add ../../Cargo.lock
 ```
+
+## Building all wasm contracts
+
+On the top level dir:
+
+```json
+docker run --rm -v "$(pwd)":/code \
+  --mount type=volume,source="$(basename "$(pwd)")_cache",target=/code/target \
+  --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
+  cosmwasm/workspace-optimizer:0.12.3
+```
+
+Look inside the `artifacts` dir that will be created.
