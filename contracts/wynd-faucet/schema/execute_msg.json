@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecuteMsg",
+  "oneOf": [
+    {
+      "description": "this will pay out some tokens to the caller, or return error if they already used their share",
+      "type": "object",
+      "required": [
+        "request_funds"
+      ],
+      "properties": {
+        "request_funds": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}

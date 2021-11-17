@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CallsResponse",
+  "type": "object",
+  "required": [
+    "calls"
+  ],
+  "properties": {
+    "calls": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  }
+}
