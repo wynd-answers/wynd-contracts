@@ -1,11 +1,14 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, WasmMsg,
+};
 use cw2::set_contract_version;
+use cw20::{BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg};
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::msg::{CallsResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{Config, CALLS, CONFIG};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:wynd-faucet";
@@ -15,20 +18,19 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
-    info: MessageInfo,
+    _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    let state = State {
-        count: msg.count,
-        owner: info.sender.clone(),
+    let config = Config {
+        token: deps.api.addr_validate(&msg.token)?,
+        amount: msg.amount,
+        max_requests: msg.max_requests.unwrap_or(1),
     };
-    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    STATE.save(deps.storage, &state)?;
 
-    Ok(Response::new()
-        .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender)
-        .add_attribute("count", msg.count.to_string()))
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    CONFIG.save(deps.storage, &config)?;
+
+    Ok(Response::new())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -39,40 +41,64 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::RequestFunds {} => request_funds(deps, info),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
+pub fn request_funds(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    CALLS.update(deps.storage, &info.sender, |count| {
+        let count = count.unwrap_or(0);
+        if count >= config.max_requests {
+            Err(ContractError::UsedAllCalls(count))
+        } else {
+            Ok(count + 1)
+        }
     })?;
 
-    Ok(Response::new().add_attribute("method", "try_increment"))
-}
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
-        }
-        state.count = count;
-        Ok(state)
-    })?;
-    Ok(Response::new().add_attribute("method", "reset"))
+    let msg = Cw20ExecuteMsg::Transfer {
+        recipient: info.sender.to_string(),
+        amount: config.amount,
+    };
+    let res = Response::new()
+        .add_message(WasmMsg::Execute {
+            contract_addr: config.token.into(),
+            msg: to_binary(&msg)?,
+            funds: vec![],
+        })
+        .add_attribute("fund", info.sender)
+        .add_attribute("amount", config.amount.to_string());
+
+    Ok(res)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        QueryMsg::Balance {} => to_binary(&query_balance(deps, env)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Calls { address } => to_binary(&query_calls(deps, address)?),
     }
 }
 
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
+fn query_balance(deps: Deps, env: Env) -> StdResult<BalanceResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let query = Cw20QueryMsg::Balance {
+        address: env.contract.address.into(),
+    };
+    deps.querier.query_wasm_smart(config.token, &query)
+}
+
+fn query_config(deps: Deps) -> StdResult<Config> {
+    let config = CONFIG.load(deps.storage)?;
+    Ok(config)
+}
+
+fn query_calls(deps: Deps, account: String) -> StdResult<CallsResponse> {
+    let account = deps.api.addr_validate(&account)?;
+    let calls = CALLS.load(deps.storage, &account)?;
+    Ok(CallsResponse { calls })
 }
 
 #[cfg(test)]
