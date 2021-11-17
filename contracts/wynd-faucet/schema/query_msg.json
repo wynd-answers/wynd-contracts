@@ -1,15 +1,50 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "QueryMsg",
-  "anyOf": [
+  "oneOf": [
     {
+      "description": "How many tokens this has left. returns cw20::BalanceResponse",
       "type": "object",
       "required": [
-        "get_count"
+        "balance"
       ],
       "properties": {
-        "get_count": {
+        "balance": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Read the Config of the contract. returns Config",
+      "type": "object",
+      "required": [
+        "config"
+      ],
+      "properties": {
+        "config": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "How many times the given address has used the faucet. returns CallsResponse",
+      "type": "object",
+      "required": [
+        "calls"
+      ],
+      "properties": {
+        "calls": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false

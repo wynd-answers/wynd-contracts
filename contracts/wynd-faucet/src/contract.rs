@@ -104,72 +104,83 @@ fn query_calls(deps: Deps, account: String) -> StdResult<CallsResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{
-        mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
-    };
-    use cosmwasm_std::{coins, from_binary};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{Addr, SubMsg, Uint128};
 
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies();
 
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(1000, "earth"));
-
-        // we can just call .unwrap() to assert this was a success
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        let amount = Uint128::new(123456789);
+        let msg = InstantiateMsg {
+            token: "wynd".to_string(),
+            amount,
+            max_requests: None,
+        };
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(17, value.count);
+        let res = query_config(deps.as_ref()).unwrap();
+        let expected = Config {
+            token: Addr::unchecked("wynd"),
+            amount,
+            max_requests: 1,
+        };
+        assert_eq!(res, expected);
     }
 
     #[test]
-    fn increment() {
-        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+    fn fund_once() {
+        let mut deps = mock_dependencies();
 
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let amount = Uint128::new(123456789);
+        let msg = InstantiateMsg {
+            token: "wynd".to_string(),
+            amount,
+            max_requests: None,
+        };
+        let info = mock_info("creator", &[]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
-        // beneficiary can release it
-        let info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Increment {};
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        // anyone can use it... once
+        let info = mock_info("anyone", &[]);
+        let msg = ExecuteMsg::RequestFunds {};
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let msg = cw20::Cw20ExecuteMsg::Transfer {
+            recipient: "anyone".to_string(),
+            amount,
+        };
+        assert_eq!(
+            res.messages,
+            [SubMsg::new(WasmMsg::Execute {
+                contract_addr: "wynd".to_string(),
+                msg: to_binary(&msg).unwrap(),
+                funds: vec![]
+            })]
+        );
 
-        // should increase counter by 1
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(18, value.count);
-    }
+        // cannot call a second time
+        let info = mock_info("anyone", &[]);
+        let msg = ExecuteMsg::RequestFunds {};
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(err, ContractError::UsedAllCalls(1));
 
-    #[test]
-    fn reset() {
-        let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
-
-        let msg = InstantiateMsg { count: 17 };
-        let info = mock_info("creator", &coins(2, "token"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let unauth_info = mock_info("anyone", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-        match res {
-            Err(ContractError::Unauthorized {}) => {}
-            _ => panic!("Must return unauthorized error"),
-        }
-
-        // only the original creator can reset the counter
-        let auth_info = mock_info("creator", &coins(2, "token"));
-        let msg = ExecuteMsg::Reset { count: 5 };
-        let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-
-        // should now be 5
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-        let value: CountResponse = from_binary(&res).unwrap();
-        assert_eq!(5, value.count);
+        // different user can use it
+        let info = mock_info("elsewhere", &[]);
+        let msg = ExecuteMsg::RequestFunds {};
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let msg = cw20::Cw20ExecuteMsg::Transfer {
+            recipient: "elsewhere".to_string(),
+            amount,
+        };
+        assert_eq!(
+            res.messages,
+            [SubMsg::new(WasmMsg::Execute {
+                contract_addr: "wynd".to_string(),
+                msg: to_binary(&msg).unwrap(),
+                funds: vec![]
+            })]
+        );
     }
 }

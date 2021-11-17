@@ -1,36 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ExecuteMsg",
-  "anyOf": [
+  "oneOf": [
     {
+      "description": "this will pay out some tokens to the caller, or return error if they already used their share",
       "type": "object",
       "required": [
-        "increment"
+        "request_funds"
       ],
       "properties": {
-        "increment": {
+        "request_funds": {
           "type": "object"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "reset"
-      ],
-      "properties": {
-        "reset": {
-          "type": "object",
-          "required": [
-            "count"
-          ],
-          "properties": {
-            "count": {
-              "type": "integer",
-              "format": "int32"
-            }
-          }
         }
       },
       "additionalProperties": false
