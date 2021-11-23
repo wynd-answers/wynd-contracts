@@ -615,6 +615,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wynd-invest"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw-storage-plus",
+ "cw2",
+ "schemars",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "wynd-oracle"
 version = "0.1.0"
 dependencies = [
