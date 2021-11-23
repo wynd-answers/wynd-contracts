@@ -17,7 +17,10 @@ pub struct InstantiateMsg {
     pub max_investment_hex: Uint128,
     // how many days the investment takes until maturity (eg. we pay out in the results in 30 days, 180 days)
     pub maturity_days: u64,
-    // TODO: oracle config - average over X days...
+    // how many days margin we have from measurement to usage.
+    // when investing, the latest data must be within X days
+    // when investment finishes, there must be data within X days of maturity
+    pub measurement_window: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -90,8 +93,8 @@ impl InvestmentResponse {
             hex,
             amount: invest.amount,
             baseline_index: invest.baseline_index,
-            invested: invest.invested,
-            maturity_date: invest.maturity_date,
+            invested: invest.invested_time,
+            maturity_date: invest.maturity_time,
         }
     }
 }

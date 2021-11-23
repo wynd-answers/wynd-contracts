@@ -14,6 +14,10 @@ pub struct Config {
     pub max_investment_hex: Uint128,
     // how many days the investment takes until maturity (eg. we pay out in the results in 30 days, 180 days)
     pub maturity_days: u64,
+    // how many days margin we have from measurement to usage.
+    // when investing, the latest data must be within X days
+    // when investment finishes, there must be data within X days of maturity
+    pub measurement_window: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
@@ -34,9 +38,9 @@ pub struct Investment {
     // starting value when investment was created
     pub baseline_index: Decimal,
     // when this investment was made - in UNIX seconds UTC
-    pub invested: u64,
+    pub invested_time: u64,
     // when this investment can be claimed - in UNIX seconds UTC
-    pub maturity_date: u64,
+    pub maturity_time: u64,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");

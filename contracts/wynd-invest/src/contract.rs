@@ -33,6 +33,7 @@ pub fn instantiate(
         token: deps.api.addr_validate(&msg.token)?,
         max_investment_hex: msg.max_investment_hex,
         maturity_days: msg.maturity_days,
+        measurement_window: msg.measurement_window,
     };
     CONFIG.save(deps.storage, &config)?;
 
@@ -101,8 +102,8 @@ pub fn invest(
     let invest = Investment {
         amount: coin.amount,
         baseline_index,
-        invested,
-        maturity_date,
+        invested_time: invested,
+        maturity_time: maturity_date,
     };
     INVESTMENTS.update::<_, StdError>(deps.storage, (&sender, &hex), |invs| {
         let mut invs = invs.unwrap_or_default();
