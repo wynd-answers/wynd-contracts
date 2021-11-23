@@ -14,7 +14,9 @@ pub struct InstantiateMsg {
     pub token: String,
     // maximum amount that can be invested in one hex
     pub max_investment_hex: Uint128,
-    // TODO: time periods - average over X days, how many days til maturity?
+    // how many days the investment takes until maturity (eg. we pay out in the results in 30 days, 180 days)
+    pub maturity_days: u64,
+    // TODO: oracle config - average over X days...
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -23,6 +25,7 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     // this will return funds from all finished investments
     Withdraw {},
+    // TODO: handle oracle entries
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -44,7 +47,7 @@ pub enum QueryMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {
-    pub cur_index: Decimal,
+    pub cur_index: Option<Decimal>,
     // amount of money invested here
     pub total_invested: Uint128,
     pub current_invested: Uint128,
@@ -64,6 +67,7 @@ pub struct InvestmentResponse {
     pub hex: String,
     // how much was invested
     pub amount: Uint128,
+    // starting value when investment was created
     pub baseline_index: Decimal,
     // when this investment was made - in UNIX seconds UTC
     pub invested: u64,
