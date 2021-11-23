@@ -12,9 +12,5 @@ pub fn validate_r3(input: String) -> Result<R3, ContractError> {
 }
 
 fn is_hex(input: &str) -> bool {
-    input.chars().all(|b| match b {
-        '0'..='9' => true,
-        'a'..='f' => true,
-        _ => return false,
-    })
+    input.chars().all(|b| matches!(b, '0'..='9' | 'a'..='f'))
 }

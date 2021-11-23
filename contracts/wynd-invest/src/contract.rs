@@ -94,7 +94,9 @@ pub fn invest(
     let invested = env.block.time.seconds();
     let maturity_date = invested + config.maturity_days * 86400;
     // TODO: remove this hack when we have oracle feed
-    let baseline_index = location.cur_index.unwrap_or(Decimal::percent(1234567));
+    let baseline_index = location
+        .cur_index
+        .unwrap_or_else(|| Decimal::percent(1234567));
     // let baseline_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
     let invest = Investment {
         amount: coin.amount,
