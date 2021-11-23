@@ -13,7 +13,7 @@ use crate::msg::{
     ListInvestmentsResponse, QueryMsg, ReceiveMsg,
 };
 use crate::r3::validate_r3;
-use crate::state::{Config, Investment, Location, CONFIG, INVESTMENTS, LOCATIONS};
+use crate::state::{Config, Investment, Location, Measurement, CONFIG, INVESTMENTS, LOCATIONS};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:wynd-invest";
@@ -95,13 +95,22 @@ pub fn invest(
     let invested = env.block.time.seconds();
     let maturity_date = invested + config.maturity_days * 86400;
     // TODO: remove this hack when we have oracle feed
-    let baseline_index = location
-        .cur_index
-        .unwrap_or_else(|| Decimal::percent(1234567));
+    let last_index = location.cur_index.unwrap_or_else(|| Measurement {
+        // 1234.567
+        value: Decimal::percent(1234567),
+        // a bit over 1 days ago
+        time: env.block.time.seconds() - 100000,
+    });
     // let baseline_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
+    if last_index.time < env.block.time.seconds() - config.measurement_window * 86400 {
+        return Err(ContractError::DataTooOld {
+            days: config.measurement_window,
+        });
+    }
+
     let invest = Investment {
         amount: coin.amount,
-        baseline_index,
+        baseline_index: last_index.value,
         invested_time: invested,
         maturity_time: maturity_date,
     };

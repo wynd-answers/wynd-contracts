@@ -22,13 +22,20 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct Location {
-    pub cur_index: Option<Decimal>,
+    pub cur_index: Option<Measurement>,
     // amount of money invested here
     pub total_invested: Uint128,
     pub current_invested: Uint128,
     // number of individual investments made (people)
     pub total_investments: u64,
     pub current_investments: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct Measurement {
+    pub value: Decimal,
+    // unix time (UTC) in seconds
+    pub time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

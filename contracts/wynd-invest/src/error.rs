@@ -18,6 +18,9 @@ pub enum ContractError {
     #[error("Cannot invest in a location without oracle data")]
     NoDataPresent,
 
+    #[error("Last measurement was more than {days} days ago, cannot use")]
+    DataTooOld { days: u64 },
+
     // TODO: remove when done
     #[error("Unimplemented")]
     Unimplemented,

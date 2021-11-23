@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::state::{Config, Investment};
+use crate::state::{Config, Investment, Measurement};
 use cosmwasm_std::{Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
 
@@ -59,7 +59,7 @@ pub type ConfigResponse = Config;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {
-    pub cur_index: Option<Decimal>,
+    pub cur_index: Option<Measurement>,
     // amount of money invested here
     pub total_invested: Uint128,
     pub current_invested: Uint128,
