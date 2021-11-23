@@ -1,11 +1,19 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{
+    from_slice, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event, MessageInfo, Order,
+    Response, StdError, StdResult,
+};
 use cw2::set_contract_version;
+use cw20::{Cw20CoinVerified, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::msg::{
+    ConfigResponse, ExecuteMsg, InfoResponse, InstantiateMsg, InvestmentResponse,
+    ListInvestmentsResponse, QueryMsg, ReceiveMsg,
+};
+use crate::r3::validate_r3;
+use crate::state::{Config, Investment, Location, CONFIG, INVESTMENTS, LOCATIONS};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:wynd-invest";
@@ -15,64 +23,162 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
-    info: MessageInfo,
+    _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    let state = State {
-        count: msg.count,
-        owner: info.sender.clone(),
-    };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    STATE.save(deps.storage, &state)?;
 
-    Ok(Response::new()
-        .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender)
-        .add_attribute("count", msg.count.to_string()))
+    let config = Config {
+        oracle: deps.api.addr_validate(&msg.oracle)?,
+        token: deps.api.addr_validate(&msg.token)?,
+        max_investment_hex: msg.max_investment_hex,
+        maturity_days: msg.maturity_days,
+    };
+    CONFIG.save(deps.storage, &config)?;
+
+    let empty_hex = Location::default();
+    for index in msg.locations.into_iter() {
+        let hex = validate_r3(index)?;
+        LOCATIONS.save(deps.storage, &hex, &empty_hex)?;
+    }
+
+    Ok(Response::new())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::Receive(msg) => receive(deps, env, info, msg),
+        ExecuteMsg::Withdraw {} => withdraw(deps, env, info),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
+pub fn receive(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    wrapper: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let coin = Cw20CoinVerified {
+        address: info.sender,
+        amount: wrapper.amount,
+    };
+    let sender = deps.api.addr_validate(&wrapper.sender)?;
+    let msg: ReceiveMsg = from_slice(&wrapper.msg)?;
+
+    match msg {
+        ReceiveMsg::Invest { hex } => invest(deps, env, sender, coin, hex),
+    }
+}
+
+pub fn invest(
+    deps: DepsMut,
+    env: Env,
+    sender: Addr,
+    coin: Cw20CoinVerified,
+    hex: String,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.token != coin.address {
+        return Err(ContractError::InvalidToken(coin.address.into()));
+    }
+
+    let hex = validate_r3(hex)?;
+    let location = LOCATIONS.load(deps.storage, &hex)?;
+
+    let invested = env.block.time.seconds();
+    let maturity_date = invested + config.maturity_days * 86400;
+    // TODO: remove this hack when we have oracle feed
+    let baseline_index = location.cur_index.unwrap_or(Decimal::percent(1234567));
+    // let baseline_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
+    let invest = Investment {
+        amount: coin.amount,
+        baseline_index,
+        invested,
+        maturity_date,
+    };
+    INVESTMENTS.update::<_, StdError>(deps.storage, (&sender, &hex), |invs| {
+        let mut invs = invs.unwrap_or_default();
+        invs.push(invest);
+        Ok(invs)
     })?;
 
-    Ok(Response::new().add_attribute("method", "try_increment"))
+    let evt = Event::new("invest")
+        .add_attribute("index", hex)
+        .add_attribute("amount", coin.amount.to_string())
+        .add_attribute("investor", sender);
+    Ok(Response::new().add_event(evt))
 }
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
-        }
-        state.count = count;
-        Ok(state)
-    })?;
-    Ok(Response::new().add_attribute("method", "reset"))
+
+pub fn withdraw(_deps: DepsMut, _env: Env, _info: MessageInfo) -> Result<Response, ContractError> {
+    // TODO
+    Err(ContractError::Unimplemented)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        QueryMsg::Config {} => Ok(to_binary(&query_config(deps)?)?),
+        QueryMsg::Info { hex } => Ok(to_binary(&query_info(deps, hex)?)?),
+        QueryMsg::ListInvestments { investor, hex } => {
+            Ok(to_binary(&list_investments(deps, investor, hex)?)?)
+        }
     }
 }
 
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
+fn query_config(deps: Deps) -> Result<ConfigResponse, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    Ok(config)
+}
+
+fn query_info(deps: Deps, hex: String) -> Result<InfoResponse, ContractError> {
+    let hex = validate_r3(hex)?;
+    let info = LOCATIONS.load(deps.storage, &hex)?;
+    Ok(InfoResponse {
+        cur_index: info.cur_index,
+        total_invested: info.total_invested,
+        current_invested: info.current_invested,
+        total_investments: info.total_investments,
+        current_investments: info.current_investments,
+    })
+}
+
+fn list_investments(
+    deps: Deps,
+    investor: String,
+    hex: Option<String>,
+) -> Result<ListInvestmentsResponse, ContractError> {
+    let hex = hex.map(validate_r3).transpose()?;
+    let investor = deps.api.addr_validate(&investor)?;
+
+    let investments = if let Some(hex) = hex {
+        INVESTMENTS
+            .load(deps.storage, (&investor, &hex))?
+            .into_iter()
+            .map(|inv| InvestmentResponse::new(inv, hex.clone()))
+            .collect()
+    } else {
+        // all for this investor
+        let nested: StdResult<Vec<Vec<_>>> = INVESTMENTS
+            .prefix_de(&investor)
+            .range(deps.storage, None, None, Order::Ascending)
+            .map(|res| {
+                let (hex, invs) = res?;
+                Ok(invs
+                    .into_iter()
+                    .map(|i| InvestmentResponse::new(i, hex.clone()))
+                    .collect())
+            })
+            .collect();
+        nested?.into_iter().flatten().collect()
+    };
+
+    Ok(ListInvestmentsResponse { investments })
 }
 
 #[cfg(test)]

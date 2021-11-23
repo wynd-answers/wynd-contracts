@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Decimal, Timestamp, Uint128};
+use crate::state::{Config, Investment};
+use cosmwasm_std::{Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -38,12 +39,20 @@ pub enum ReceiveMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
+    Config {},
     // Information about one hex spot - current oracle, investment counts
-    Info { hex: String },
+    Info {
+        hex: String,
+    },
     // List all investments by user, possibly filtering on one hex location
     // FIXME: add pagination?
-    ListInvestments { addr: String, hex: Option<String> },
+    ListInvestments {
+        investor: String,
+        hex: Option<String>,
+    },
 }
+
+pub type ConfigResponse = Config;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {
@@ -73,4 +82,16 @@ pub struct InvestmentResponse {
     pub invested: u64,
     // when this investment can be claimed - in UNIX seconds UTC
     pub maturity_date: u64,
+}
+
+impl InvestmentResponse {
+    pub fn new(invest: Investment, hex: String) -> Self {
+        InvestmentResponse {
+            hex,
+            amount: invest.amount,
+            baseline_index: invest.baseline_index,
+            invested: invest.invested,
+            maturity_date: invest.maturity_date,
+        }
+    }
 }

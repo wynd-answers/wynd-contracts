@@ -11,4 +11,14 @@ pub enum ContractError {
 
     #[error("Invalid R3 Index: {0}")]
     InvalidR3(String),
+
+    #[error("Cannot pay with token: {0}")]
+    InvalidToken(String),
+
+    #[error("Cannot invest in a location without oracle data")]
+    NoDataPresent,
+
+    // TODO: remove when done
+    #[error("Unimplemented")]
+    Unimplemented,
 }
