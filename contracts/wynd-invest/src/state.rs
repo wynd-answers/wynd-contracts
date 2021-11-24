@@ -54,6 +54,12 @@ pub struct Measurement {
     pub time: u64,
 }
 
+impl Measurement {
+    pub fn new(value: Decimal, time: u64) -> Measurement {
+        Measurement { value, time }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Investment {
     // how much was invested
@@ -84,7 +90,12 @@ impl Investment {
                 Some(val) if val <= cfg.measurement_window * 86400 => {
                     // measurement after maturity, within window
                     // calculate ratio, positive, if measurement below baseline
-                    let reward = self.amount * (self.baseline_index * measure.value.inv().unwrap());
+                    // no code to divide Decimals, so we do this
+                    let ratio = Decimal::from_ratio(
+                        self.baseline_index.numerator(),
+                        measure.value.numerator(),
+                    );
+                    let reward = self.amount * ratio;
                     Some(reward)
                 }
                 Some(_) => {
@@ -105,3 +116,75 @@ impl Investment {
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const LOCATIONS: Map<&str, Location> = Map::new("locations");
 pub const INVESTMENTS: Map<(&Addr, &str), Vec<Investment>> = Map::new("investments");
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use cosmwasm_std::testing::mock_env;
+
+    fn env_at(secs: u64) -> Env {
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(secs);
+        env
+    }
+
+    fn time_at(secs: u64) -> u64 {
+        mock_env().block.time.seconds() + secs
+    }
+
+    fn loc_with_measurement(measure: Measurement) -> Location {
+        let mut loc = Location::default();
+        loc.cur_index = Some(measure);
+        loc
+    }
+
+    #[test]
+    fn investment_rewards() {
+        let maturity_time = time_at(123 + 7 * 86400);
+        let cfg = Config {
+            oracle: Addr::unchecked(""),
+            token: Addr::unchecked(""),
+            max_investment_hex: Uint128::new(1234567890123),
+            maturity_days: 7,
+            measurement_window: 2,
+        };
+        let invest = Investment {
+            amount: Uint128::new(10000),
+            baseline_index: Decimal::percent(450), // 4.5
+            invested_time: time_at(123),
+            maturity_time,
+        };
+
+        // should get 1.5x payout
+        let result = Decimal::percent(300);
+        let no_measure = Location::default();
+        let old_measurement = loc_with_measurement(Measurement::new(result, maturity_time - 1000));
+        let good_measurement =
+            loc_with_measurement(Measurement::new(result, maturity_time + 86400));
+        let late_measurement =
+            loc_with_measurement(Measurement::new(result, maturity_time + 3 * 86400));
+
+        // env correct but no measurement
+        let env = env_at(maturity_time + 2);
+        assert!(invest.reward(&env, &no_measure, &cfg).is_none());
+
+        // env correct but old measurement
+        assert!(invest.reward(&env, &old_measurement, &cfg).is_none());
+
+        // env correct and good measurement -> 1.5x payout
+        assert_eq!(
+            invest.reward(&env, &good_measurement, &cfg),
+            Some(Uint128::new(15000))
+        );
+
+        // env correct and late measurement -> 100% payout
+        assert_eq!(
+            invest.reward(&env, &late_measurement, &cfg),
+            Some(Uint128::new(10000))
+        );
+
+        // measurement good, not yet mature, no payout (not sure how this happens...)
+        let env = env_at(0);
+        assert!(invest.reward(&env, &good_measurement, &cfg).is_none());
+    }
+}
