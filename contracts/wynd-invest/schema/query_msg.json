@@ -1,15 +1,61 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "QueryMsg",
-  "anyOf": [
+  "oneOf": [
     {
       "type": "object",
       "required": [
-        "get_count"
+        "config"
       ],
       "properties": {
-        "get_count": {
+        "config": {
           "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "info"
+      ],
+      "properties": {
+        "info": {
+          "type": "object",
+          "required": [
+            "hex"
+          ],
+          "properties": {
+            "hex": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "list_investments"
+      ],
+      "properties": {
+        "list_investments": {
+          "type": "object",
+          "required": [
+            "investor"
+          ],
+          "properties": {
+            "hex": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "investor": {
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false
