@@ -4,6 +4,7 @@ workflows:
   test:
     jobs:
       - contract_wynd_faucet
+      - contract_wynd_invest
       - contract_wynd_oracle
       - package_utils
       - lint
@@ -44,6 +45,33 @@ jobs:
             - /usr/local/cargo/registry
             - target
           key: cargocache-wynd-faucet-rust:1.53.0-{{ checksum "~/project/Cargo.lock" }}
+
+  contract_wynd_invest:
+    docker:
+      - image: rust:1.53.0
+    working_directory: ~/project/contracts/wynd-invest
+    steps:
+      - checkout:
+          path: ~/project
+      - run:
+          name: Version information
+          command: rustc --version; cargo --version; rustup --version
+      - restore_cache:
+          keys:
+            - cargocache-wynd-invest-rust:1.53.0-{{ checksum "~/project/Cargo.lock" }}
+      - run:
+          name: Unit Tests
+          environment:
+            RUST_BACKTRACE: 1
+          command: cargo unit-test --locked
+      - run:
+          name: Build and run schema generator
+          command: cargo schema --locked
+      - save_cache:
+          paths:
+            - /usr/local/cargo/registry
+            - target
+          key: cargocache-wynd-invest-rust:1.53.0-{{ checksum "~/project/Cargo.lock" }}
 
   contract_wynd_oracle:
     docker:
