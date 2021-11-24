@@ -91,10 +91,13 @@ pub fn invest(
     }
 
     let hex = validate_r3(hex)?;
-    let location = LOCATIONS.load(deps.storage, &hex)?;
-
     let invested = env.block.time.seconds();
     let maturity_date = invested + config.maturity_days * 86400;
+
+    let mut location = LOCATIONS.load(deps.storage, &hex)?;
+    location.add_investment(coin.amount);
+    LOCATIONS.save(deps.storage, &hex, &location)?;
+
     let last_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
     if last_index.time < env.block.time.seconds() - config.measurement_window * 86400 {
         return Err(ContractError::DataTooOld {
@@ -136,13 +139,10 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     for (hex, invests) in investments?.into_iter() {
         let mut loc = LOCATIONS.load(deps.storage, &hex)?;
 
-        // TODO: manage investment count in here, manage cur invested here
-
         for inv in invests.iter() {
-            if inv.is_mature(&env) {
-                to_withdraw += inv.calculate_return(&loc, &cfg);
-                loc.current_investments -= 1;
-                loc.current_invested = loc.current_invested.checked_sub(inv.amount)?;
+            if let Some(reward) = inv.reward(&env, &loc, &cfg) {
+                to_withdraw += reward;
+                loc.finish_investment(inv.amount)?;
                 // TODO: remove, how??? use fold.
             }
         }

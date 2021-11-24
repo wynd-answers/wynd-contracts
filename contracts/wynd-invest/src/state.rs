@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, Env, Uint128};
+use crate::ContractError;
+use cosmwasm_std::{Addr, Decimal, Env, Fraction, Uint128};
 use cw_storage_plus::{Item, Map};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,6 +32,21 @@ pub struct Location {
     pub current_investments: u64,
 }
 
+impl Location {
+    pub fn add_investment(&mut self, amount: Uint128) {
+        self.total_invested += amount;
+        self.current_invested += amount;
+        self.total_investments += 1;
+        self.current_investments += 1;
+    }
+
+    pub fn finish_investment(&mut self, amount: Uint128) -> Result<(), ContractError> {
+        self.current_investments -= 1;
+        self.current_invested = self.current_invested.checked_sub(amount)?;
+        Ok(())
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct Measurement {
     pub value: Decimal,
@@ -51,13 +67,38 @@ pub struct Investment {
 }
 
 impl Investment {
+    /// whether or not this investment has reached maturity date and can be withdrawn
     pub fn is_mature(&self, env: &Env) -> bool {
         env.block.time.seconds() >= self.maturity_time
     }
 
-    // this should only be called if it is mature, it may panic if called before maturity
-    pub fn calculate_return(&self, _loc: &Location, _cfg: &Config) -> Uint128 {
-        unimplemented!();
+    /// calculates the reward. if it is not mature, or there is insufficient data
+    /// to provide a result, then it will return None
+    pub fn reward(&self, env: &Env, loc: &Location, cfg: &Config) -> Option<Uint128> {
+        if !self.is_mature(env) {
+            return None;
+        }
+        // TODO: we need to store historical data... you cannot just wait it out
+        if let Some(measure) = &loc.cur_index {
+            match measure.time.checked_sub(self.maturity_time) {
+                Some(val) if val <= cfg.measurement_window * 86400 => {
+                    // measurement after maturity, within window
+                    // calculate ratio, positive, if measurement below baseline
+                    let reward = self.amount * (self.baseline_index * measure.value.inv().unwrap());
+                    Some(reward)
+                }
+                Some(_) => {
+                    // measurement after maturity, after window, return 100%
+                    Some(self.amount)
+                }
+                None => {
+                    // measurement before maturity date
+                    None
+                }
+            }
+        } else {
+            None
+        }
     }
 }
 
