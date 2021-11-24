@@ -78,6 +78,12 @@ pub struct InfoResponse {
     pub current_investments: u64,
 }
 
+impl InfoResponse {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ListInvestmentsResponse {
     pub investments: Vec<InvestmentResponse>,

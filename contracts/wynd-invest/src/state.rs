@@ -33,6 +33,10 @@ pub struct Location {
 }
 
 impl Location {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
     pub fn add_investment(&mut self, amount: Uint128) {
         self.total_invested += amount;
         self.current_invested += amount;
@@ -133,7 +137,7 @@ mod test {
     }
 
     fn loc_with_measurement(measure: Measurement) -> Location {
-        let mut loc = Location::default();
+        let mut loc = Location::new();
         loc.cur_index = Some(measure);
         loc
     }

@@ -330,7 +330,7 @@ mod tests {
 
         let info = mock_info("creator", &[]);
         let msg = init_with_locations(&["foobar"]);
-        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap_err();
     }
 
     #[test]
@@ -340,7 +340,7 @@ mod tests {
         let location = "8362718ffffffff";
         let info = mock_info("creator", &[]);
         let msg = init_with_locations(&[location]);
-        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let info = query_info(deps.as_ref(), location.into()).unwrap();
         assert_eq!(info, InfoResponse::default());
@@ -375,17 +375,11 @@ mod tests {
         assert_eq!(err, ContractError::Unauthorized {});
 
         // just right
-        execute(
-            deps.as_mut(),
-            env_at(1234),
-            mock_info("oracle", &[]),
-            msg.clone(),
-        )
-        .unwrap();
+        execute(deps.as_mut(), env_at(1234), mock_info("oracle", &[]), msg).unwrap();
 
         // check updated
         let info = query_info(deps.as_ref(), location.into()).unwrap();
-        let mut expected = InfoResponse::default();
+        let mut expected = InfoResponse::new();
         expected.cur_index = Some(Measurement {
             value: Decimal::percent(1234),
             time: time_at(20),
@@ -414,7 +408,7 @@ mod tests {
         let location = "8362718ffffffff";
         let info = mock_info("creator", &[]);
         let msg = init_with_locations(&[location]);
-        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let info = query_info(deps.as_ref(), location.into()).unwrap();
         assert_eq!(info, InfoResponse::default());
