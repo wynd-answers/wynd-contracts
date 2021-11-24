@@ -268,75 +268,189 @@ fn list_investments(
     Ok(ListInvestmentsResponse { investments })
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use cosmwasm_std::testing::{
-//         mock_dependencies, mock_dependencies_with_balance, mock_env, mock_info,
-//     };
-//     use cosmwasm_std::{coins, from_binary};
-//
-//     #[test]
-//     fn proper_initialization() {
-//         let mut deps = mock_dependencies();
-//
-//         let msg = InstantiateMsg { count: 17 };
-//         let info = mock_info("creator", &coins(1000, "earth"));
-//
-//         // we can just call .unwrap() to assert this was a success
-//         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-//         assert_eq!(0, res.messages.len());
-//
-//         // it worked, let's query the state
-//         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-//         let value: CountResponse = from_binary(&res).unwrap();
-//         assert_eq!(17, value.count);
-//     }
-//
-//     #[test]
-//     fn increment() {
-//         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
-//
-//         let msg = InstantiateMsg { count: 17 };
-//         let info = mock_info("creator", &coins(2, "token"));
-//         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-//
-//         // beneficiary can release it
-//         let info = mock_info("anyone", &coins(2, "token"));
-//         let msg = ExecuteMsg::Increment {};
-//         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-//
-//         // should increase counter by 1
-//         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-//         let value: CountResponse = from_binary(&res).unwrap();
-//         assert_eq!(18, value.count);
-//     }
-//
-//     #[test]
-//     fn reset() {
-//         let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
-//
-//         let msg = InstantiateMsg { count: 17 };
-//         let info = mock_info("creator", &coins(2, "token"));
-//         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-//
-//         // beneficiary can release it
-//         let unauth_info = mock_info("anyone", &coins(2, "token"));
-//         let msg = ExecuteMsg::Reset { count: 5 };
-//         let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-//         match res {
-//             Err(ContractError::Unauthorized {}) => {}
-//             _ => panic!("Must return unauthorized error"),
-//         }
-//
-//         // only the original creator can reset the counter
-//         let auth_info = mock_info("creator", &coins(2, "token"));
-//         let msg = ExecuteMsg::Reset { count: 5 };
-//         let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-//
-//         // should now be 5
-//         let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-//         let value: CountResponse = from_binary(&res).unwrap();
-//         assert_eq!(5, value.count);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::Decimal;
+
+    fn env_at(secs: u64) -> Env {
+        let mut env = mock_env();
+        env.block.time = env.block.time.plus_seconds(secs);
+        env
+    }
+
+    fn time_at(secs: u64) -> u64 {
+        mock_env().block.time.seconds() + secs
+    }
+
+    fn init_with_locations(locs: &[&str]) -> InstantiateMsg {
+        InstantiateMsg {
+            oracle: "oracle".to_string(),
+            locations: locs.iter().map(|s| s.to_string()).collect(),
+            token: "token".to_string(),
+            max_investment_hex: Uint128::new(12345678),
+            maturity_days: 28,
+            measurement_window: 7,
+        }
+    }
+
+    #[test]
+    fn proper_initialization() {
+        let mut deps = mock_dependencies();
+
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&["8765437FFFFFFFF", "1284639ffffffff"]);
+
+        // we can just call .unwrap() to assert this was a success
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // it worked, let's query the state
+        let res = query_config(deps.as_ref()).unwrap();
+        let expected = Config {
+            oracle: Addr::unchecked(msg.oracle),
+            token: Addr::unchecked(msg.token),
+            max_investment_hex: msg.max_investment_hex,
+            maturity_days: msg.maturity_days,
+            measurement_window: msg.measurement_window,
+        };
+        assert_eq!(res, expected);
+
+        // check out the locations
+        let info1 = query_info(deps.as_ref(), "8765437FFFFFfff".into()).unwrap();
+        assert_eq!(info1, InfoResponse::default());
+        let info2 = query_info(deps.as_ref(), "1284639ffFFffff".into()).unwrap();
+        assert_eq!(info2, InfoResponse::default());
+    }
+
+    #[test]
+    fn validate_locations_in_init() {
+        let mut deps = mock_dependencies();
+
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&["foobar"]);
+        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap_err();
+    }
+
+    #[test]
+    fn set_oracle_data() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location]);
+        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+        let info = query_info(deps.as_ref(), location.into()).unwrap();
+        assert_eq!(info, InfoResponse::default());
+
+        // set this with some oracle data
+        let msg = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(20),
+            }],
+        };
+
+        // fail if in the future
+        let err = execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("oracle", &[]),
+            msg.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::OracleFromTheFuture(time_at(20)));
+
+        // fail if not oracle
+        let err = execute(
+            deps.as_mut(),
+            env_at(1234),
+            mock_info("token", &[]),
+            msg.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::Unauthorized {});
+
+        // just right
+        execute(
+            deps.as_mut(),
+            env_at(1234),
+            mock_info("oracle", &[]),
+            msg.clone(),
+        )
+        .unwrap();
+
+        // check updated
+        let info = query_info(deps.as_ref(), location.into()).unwrap();
+        let mut expected = InfoResponse::default();
+        expected.cur_index = Some(Measurement {
+            value: Decimal::percent(1234),
+            time: time_at(20),
+        });
+        assert_eq!(info, expected);
+
+        // reject bad location
+        let msg = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: "9362718FFffffff".to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(20),
+            }],
+        };
+        let err = execute(deps.as_mut(), env_at(1234), mock_info("oracle", &[]), msg).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::UnregisteredLocation("9362718ffffffff".to_string())
+        );
+    }
+
+    //     #[test]
+    // fn increment() {
+    //     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+    //
+    //     let msg = InstantiateMsg { count: 17 };
+    //     let info = mock_info("creator", &coins(2, "token"));
+    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    //
+    //     // beneficiary can release it
+    //     let info = mock_info("anyone", &coins(2, "token"));
+    //     let msg = ExecuteMsg::Increment {};
+    //     let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+    //
+    //     // should increase counter by 1
+    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
+    //     let value: CountResponse = from_binary(&res).unwrap();
+    //     assert_eq!(18, value.count);
+    // }
+    //
+    // #[test]
+    // fn reset() {
+    //     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
+    //
+    //     let msg = InstantiateMsg { count: 17 };
+    //     let info = mock_info("creator", &coins(2, "token"));
+    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+    //
+    //     // beneficiary can release it
+    //     let unauth_info = mock_info("anyone", &coins(2, "token"));
+    //     let msg = ExecuteMsg::Reset { count: 5 };
+    //     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
+    //     match res {
+    //         Err(ContractError::Unauthorized {}) => {}
+    //         _ => panic!("Must return unauthorized error"),
+    //     }
+    //
+    //     // only the original creator can reset the counter
+    //     let auth_info = mock_info("creator", &coins(2, "token"));
+    //     let msg = ExecuteMsg::Reset { count: 5 };
+    //     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
+    //
+    //     // should now be 5
+    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
+    //     let value: CountResponse = from_binary(&res).unwrap();
+    //     assert_eq!(5, value.count);
+    // }
+}

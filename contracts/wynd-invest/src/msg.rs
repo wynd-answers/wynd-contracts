@@ -67,7 +67,7 @@ pub enum QueryMsg {
 
 pub type ConfigResponse = Config;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct InfoResponse {
     pub cur_index: Option<Measurement>,
     // amount of money invested here
