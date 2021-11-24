@@ -29,7 +29,17 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
     // this will return funds from all finished investments
     Withdraw {},
-    // TODO: handle oracle entries
+    StoreOracle { values: Vec<OracleValues> },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct OracleValues {
+    // r3 index of the measurement
+    pub index: String,
+    // value measured
+    pub value: Decimal,
+    // unix time (UTC) in seconds
+    pub time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

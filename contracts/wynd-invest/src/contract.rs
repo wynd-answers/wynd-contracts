@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_slice, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event, MessageInfo, Order,
-    Response, StdError, StdResult,
+    ensure_eq, from_slice, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event,
+    MessageInfo, Order, Response, StdError, StdResult,
 };
 use cw2::set_contract_version;
 use cw20::{Cw20CoinVerified, Cw20ReceiveMsg};
@@ -10,7 +10,7 @@ use cw20::{Cw20CoinVerified, Cw20ReceiveMsg};
 use crate::error::ContractError;
 use crate::msg::{
     ConfigResponse, ExecuteMsg, InfoResponse, InstantiateMsg, InvestmentResponse,
-    ListInvestmentsResponse, QueryMsg, ReceiveMsg,
+    ListInvestmentsResponse, OracleValues, QueryMsg, ReceiveMsg,
 };
 use crate::r3::validate_r3;
 use crate::state::{Config, Investment, Location, Measurement, CONFIG, INVESTMENTS, LOCATIONS};
@@ -56,6 +56,7 @@ pub fn execute(
     match msg {
         ExecuteMsg::Receive(msg) => receive(deps, env, info, msg),
         ExecuteMsg::Withdraw {} => withdraw(deps, env, info),
+        ExecuteMsg::StoreOracle { values } => store_oracle(deps, env, info, values),
     }
 }
 
@@ -130,6 +131,35 @@ pub fn invest(
 pub fn withdraw(_deps: DepsMut, _env: Env, _info: MessageInfo) -> Result<Response, ContractError> {
     // TODO
     Err(ContractError::Unimplemented)
+}
+
+pub fn store_oracle(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    values: Vec<OracleValues>,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    ensure_eq!(config.oracle, info.sender, ContractError::Unauthorized {});
+
+    let count = values.len();
+    for val in values.into_iter() {
+        let hex = validate_r3(val.index)?;
+        let mut loc = LOCATIONS
+            .load(deps.storage, &hex)
+            .map_err(|_| ContractError::UnregisteredLocation(hex.clone()))?;
+        if val.time > env.block.time.seconds() {
+            return Err(ContractError::OracleFromTheFuture(val.time));
+        }
+        loc.cur_index = Some(Measurement {
+            value: val.value,
+            time: val.time,
+        });
+        LOCATIONS.save(deps.storage, &hex, &loc)?;
+    }
+
+    let evt = Event::new("oracle").add_attribute("count", count.to_string());
+    Ok(Response::new().add_event(evt))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

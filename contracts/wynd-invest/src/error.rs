@@ -12,8 +12,14 @@ pub enum ContractError {
     #[error("Invalid R3 Index: {0}")]
     InvalidR3(String),
 
+    #[error("Location not registered during initialization: {0}")]
+    UnregisteredLocation(String),
+
     #[error("Cannot pay with token: {0}")]
     InvalidToken(String),
+
+    #[error("Oracle setting data from the future, unix time: {0}")]
+    OracleFromTheFuture(u64),
 
     #[error("Cannot invest in a location without oracle data")]
     NoDataPresent,
