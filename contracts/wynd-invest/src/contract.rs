@@ -407,50 +407,128 @@ mod tests {
         );
     }
 
-    //     #[test]
-    // fn increment() {
-    //     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
-    //
-    //     let msg = InstantiateMsg { count: 17 };
-    //     let info = mock_info("creator", &coins(2, "token"));
-    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // beneficiary can release it
-    //     let info = mock_info("anyone", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Increment {};
-    //     let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // should increase counter by 1
-    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-    //     let value: CountResponse = from_binary(&res).unwrap();
-    //     assert_eq!(18, value.count);
-    // }
-    //
-    // #[test]
-    // fn reset() {
-    //     let mut deps = mock_dependencies_with_balance(&coins(2, "token"));
-    //
-    //     let msg = InstantiateMsg { count: 17 };
-    //     let info = mock_info("creator", &coins(2, "token"));
-    //     let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-    //
-    //     // beneficiary can release it
-    //     let unauth_info = mock_info("anyone", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let res = execute(deps.as_mut(), mock_env(), unauth_info, msg);
-    //     match res {
-    //         Err(ContractError::Unauthorized {}) => {}
-    //         _ => panic!("Must return unauthorized error"),
-    //     }
-    //
-    //     // only the original creator can reset the counter
-    //     let auth_info = mock_info("creator", &coins(2, "token"));
-    //     let msg = ExecuteMsg::Reset { count: 5 };
-    //     let _res = execute(deps.as_mut(), mock_env(), auth_info, msg).unwrap();
-    //
-    //     // should now be 5
-    //     let res = query(deps.as_ref(), mock_env(), QueryMsg::GetCount {}).unwrap();
-    //     let value: CountResponse = from_binary(&res).unwrap();
-    //     assert_eq!(5, value.count);
-    // }
+    #[test]
+    fn check_investment() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location]);
+        instantiate(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+
+        let info = query_info(deps.as_ref(), location.into()).unwrap();
+        assert_eq!(info, InfoResponse::default());
+
+        // cannot invest without data
+        let amount = Uint128::new(777000);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount,
+            msg: to_binary(&payload).unwrap(),
+        });
+
+        let err = execute(
+            deps.as_mut(),
+            env_at(1234),
+            mock_info("token", &[]),
+            wrapped.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ContractError::NoDataPresent);
+
+        // set this with some oracle data
+        let measurement = Measurement {
+            value: Decimal::percent(1234),
+            time: time_at(20),
+        };
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: measurement.value,
+                time: measurement.time,
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(1234),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // try to invest again
+        execute(
+            deps.as_mut(),
+            env_at(5000),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // check investment
+        let mut invests =
+            list_investments(deps.as_ref(), "investor".into(), Some(location.into())).unwrap();
+        let invests2 = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests, invests2);
+        assert_eq!(invests.investments.len(), 1);
+        let invest = invests.investments.pop().unwrap();
+        let expected = InvestmentResponse {
+            hex: location.to_string(),
+            amount,
+            baseline_index: measurement.value,
+            invested: time_at(5000),
+            maturity_date: time_at(5000 + 28 * 86400),
+        };
+        assert_eq!(invest, expected);
+
+        // update oracle
+        let value2 = Decimal::percent(4321);
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: value2,
+                time: time_at(86400 + 5000),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400 + 10000),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // invest again
+        let amount2 = Uint128::new(12345678);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount: amount2,
+            msg: to_binary(&payload).unwrap(),
+        });
+        execute(
+            deps.as_mut(),
+            env_at(2 * 86400),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // get both
+        let expected2 = InvestmentResponse {
+            hex: location.to_string(),
+            amount: amount2,
+            baseline_index: value2,
+            invested: time_at(2 * 86400),
+            maturity_date: time_at(30 * 86400),
+        };
+        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests.investments.len(), 2);
+        assert_eq!(invests.investments, vec![expected, expected2]);
+    }
 }
