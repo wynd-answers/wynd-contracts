@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{OverflowError, StdError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,4 +30,10 @@ pub enum ContractError {
     // TODO: remove when done
     #[error("Unimplemented")]
     Unimplemented,
+}
+
+impl From<OverflowError> for ContractError {
+    fn from(other: OverflowError) -> ContractError {
+        ContractError::Std(other.into())
+    }
 }

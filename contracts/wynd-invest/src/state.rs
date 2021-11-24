@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, Uint128};
+use cosmwasm_std::{Addr, Decimal, Env, Uint128};
 use cw_storage_plus::{Item, Map};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -48,6 +48,17 @@ pub struct Investment {
     pub invested_time: u64,
     // when this investment can be claimed - in UNIX seconds UTC
     pub maturity_time: u64,
+}
+
+impl Investment {
+    pub fn is_mature(&self, env: &Env) -> bool {
+        env.block.time.seconds() >= self.maturity_time
+    }
+
+    // this should only be called if it is mature, it may panic if called before maturity
+    pub fn calculate_return(&self, _loc: &Location, _cfg: &Config) -> Uint128 {
+        unimplemented!();
+    }
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");

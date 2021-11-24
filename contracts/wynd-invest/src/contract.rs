@@ -1,11 +1,11 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    ensure_eq, from_slice, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event,
-    MessageInfo, Order, Response, StdError, StdResult,
+    ensure_eq, from_slice, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Order,
+    Response, StdError, StdResult, Uint128,
 };
 use cw2::set_contract_version;
-use cw20::{Cw20CoinVerified, Cw20ReceiveMsg};
+use cw20::{Cw20CoinVerified, Cw20Contract, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{
@@ -95,14 +95,7 @@ pub fn invest(
 
     let invested = env.block.time.seconds();
     let maturity_date = invested + config.maturity_days * 86400;
-    // TODO: remove this hack when we have oracle feed
-    let last_index = location.cur_index.unwrap_or_else(|| Measurement {
-        // 1234.567
-        value: Decimal::percent(1234567),
-        // a bit over 1 days ago
-        time: env.block.time.seconds() - 100000,
-    });
-    // let baseline_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
+    let last_index = location.cur_index.ok_or(ContractError::NoDataPresent)?;
     if last_index.time < env.block.time.seconds() - config.measurement_window * 86400 {
         return Err(ContractError::DataTooOld {
             days: config.measurement_window,
@@ -121,6 +114,8 @@ pub fn invest(
         Ok(invs)
     })?;
 
+    // TODO: update investment info in Location
+
     let evt = Event::new("invest")
         .add_attribute("index", hex)
         .add_attribute("amount", coin.amount.to_string())
@@ -128,9 +123,46 @@ pub fn invest(
     Ok(Response::new().add_event(evt))
 }
 
-pub fn withdraw(_deps: DepsMut, _env: Env, _info: MessageInfo) -> Result<Response, ContractError> {
-    // TODO
-    Err(ContractError::Unimplemented)
+pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+
+    let investments: StdResult<Vec<_>> = INVESTMENTS
+        .prefix_de(&info.sender)
+        .range(deps.storage, None, None, Order::Ascending)
+        .collect();
+
+    let mut to_withdraw = Uint128::zero();
+
+    for (hex, invests) in investments?.into_iter() {
+        let mut loc = LOCATIONS.load(deps.storage, &hex)?;
+
+        // TODO: manage investment count in here, manage cur invested here
+
+        for inv in invests.iter() {
+            if inv.is_mature(&env) {
+                to_withdraw += inv.calculate_return(&loc, &cfg);
+                loc.current_investments -= 1;
+                loc.current_invested = loc.current_invested.checked_sub(inv.amount)?;
+                // TODO: remove, how??? use fold.
+            }
+        }
+
+        LOCATIONS.save(deps.storage, &hex, &loc)?;
+        INVESTMENTS.save(deps.storage, (&info.sender, &hex), &invests)?;
+    }
+
+    if to_withdraw.is_zero() {
+        return Ok(Response::new());
+    }
+
+    let msg = Cw20Contract(cfg.token).call(Cw20ExecuteMsg::Transfer {
+        recipient: info.sender.to_string(),
+        amount: to_withdraw,
+    })?;
+    let evt = Event::new("withdraw")
+        .add_attribute("amount", to_withdraw.to_string())
+        .add_attribute("investor", info.sender);
+    Ok(Response::new().add_event(evt).add_message(msg))
 }
 
 pub fn store_oracle(
