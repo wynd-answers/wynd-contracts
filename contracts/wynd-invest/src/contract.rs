@@ -94,6 +94,7 @@ pub fn invest(
     let invested = env.block.time.seconds();
     let maturity_date = invested + config.maturity_days * 86400;
 
+    // update investment info in Location
     let mut location = LOCATIONS.load(deps.storage, &hex)?;
     location.add_investment(coin.amount);
     LOCATIONS.save(deps.storage, &hex, &location)?;
@@ -117,8 +118,6 @@ pub fn invest(
         Ok(invs)
     })?;
 
-    // TODO: update investment info in Location
-
     let evt = Event::new("invest")
         .add_attribute("index", hex)
         .add_attribute("amount", coin.amount.to_string())
@@ -139,13 +138,27 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     for (hex, invests) in investments?.into_iter() {
         let mut loc = LOCATIONS.load(deps.storage, &hex)?;
 
-        for inv in invests.iter() {
-            if let Some(reward) = inv.reward(&env, &loc, &cfg) {
-                to_withdraw += reward;
-                loc.finish_investment(inv.amount)?;
-                // TODO: remove, how??? use fold.
+        // this filters out to leave non-mature investments
+        // returns a tally from all mature investments of original amounts and rewards to pay out
+        let init: Result<_, ContractError> = Ok((
+            Vec::with_capacity(invests.len()),
+            Uint128::zero(),
+            Uint128::zero(),
+        ));
+        let (invests, reward, orig) = invests.into_iter().fold(init, |acc, invest| {
+            let (mut v, total, orig) = acc?;
+            match invest.reward(&env, &loc, &cfg) {
+                Some(reward) => Ok((v, total + reward, orig + invest.amount)),
+                None => {
+                    v.push(invest);
+                    Ok((v, total, orig))
+                }
             }
-        }
+        })?;
+        // update location state with the redeemed investments
+        loc.finish_investment(orig)?;
+        // and tally up how much to pay out
+        to_withdraw += reward;
 
         LOCATIONS.save(deps.storage, &hex, &loc)?;
         INVESTMENTS.save(deps.storage, (&info.sender, &hex), &invests)?;

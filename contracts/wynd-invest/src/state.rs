@@ -104,5 +104,4 @@ impl Investment {
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const LOCATIONS: Map<&str, Location> = Map::new("locations");
-// TODO: don't use Vec
 pub const INVESTMENTS: Map<(&Addr, &str), Vec<Investment>> = Map::new("investments");
