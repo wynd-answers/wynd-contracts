@@ -712,4 +712,18 @@ mod tests {
         .unwrap();
         assert_eq!(res.messages, vec![]);
     }
+
+    #[test]
+    fn migration_passes() {
+        let mut deps = mock_dependencies();
+
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&["8765437FFFFFFFF", "1284639ffffffff"]);
+
+        // we can just call .unwrap() to assert this was a success
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // and ensure migrate passes
+        migrate(deps.as_mut(), mock_env(), MigrateMsg {}).unwrap();
+    }
 }
