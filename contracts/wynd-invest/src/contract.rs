@@ -144,19 +144,20 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
             Vec::with_capacity(invests.len()),
             Uint128::zero(),
             Uint128::zero(),
+            0u64,
         ));
-        let (invests, reward, orig) = invests.into_iter().fold(init, |acc, invest| {
-            let (mut v, total, orig) = acc?;
+        let (invests, reward, orig, count) = invests.into_iter().fold(init, |acc, invest| {
+            let (mut v, total, orig, count) = acc?;
             match invest.reward(&env, &loc, &cfg) {
-                Some(reward) => Ok((v, total + reward, orig + invest.amount)),
+                Some(reward) => Ok((v, total + reward, orig + invest.amount, count + 1)),
                 None => {
                     v.push(invest);
-                    Ok((v, total, orig))
+                    Ok((v, total, orig, count))
                 }
             }
         })?;
         // update location state with the redeemed investments
-        loc.finish_investment(orig)?;
+        loc.finish_investment(orig, count)?;
         // and tally up how much to pay out
         to_withdraw += reward;
 
@@ -272,7 +273,7 @@ fn list_investments(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::Decimal;
+    use cosmwasm_std::{Decimal, SubMsg, WasmMsg};
 
     fn env_at(secs: u64) -> Env {
         let mut env = mock_env();
@@ -524,5 +525,175 @@ mod tests {
         let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
         assert_eq!(invests.investments.len(), 2);
         assert_eq!(invests.investments, vec![expected, expected2]);
+    }
+
+    #[test]
+    fn withdraw_happy_path() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let location2 = "9362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location, location2]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // oracle info for one
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(200),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // invest there
+        let amount = Uint128::new(808000);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount,
+            msg: to_binary(&payload).unwrap(),
+        });
+        execute(
+            deps.as_mut(),
+            env_at(2 * 86400),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // more oracle data
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(2468),
+                time: time_at(86400 * 31),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400 * 31 + 2000),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests.investments.len(), 1);
+
+        // now withdrawl works
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+
+        // value doubled, we get 50% out
+        let end_amount = amount * Decimal::percent(50);
+        let expected = Cw20ExecuteMsg::Transfer {
+            recipient: "investor".to_string(),
+            amount: end_amount,
+        };
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(WasmMsg::Execute {
+                contract_addr: "token".to_string(),
+                msg: to_binary(&expected).unwrap(),
+                funds: vec![]
+            })]
+        );
+
+        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests.investments.len(), 0);
+
+        // cannot withdraw again, no investments
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
+    }
+
+    #[test]
+    fn withdraw_error_cases() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let location2 = "9362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location, location2]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // oracle info for one
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(200),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // invest there
+        let amount = Uint128::new(808000);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount,
+            msg: to_binary(&payload).unwrap(),
+        });
+        execute(
+            deps.as_mut(),
+            env_at(2 * 86400),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // withdraw too early, no op
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(22 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
+
+        // withdraw later, no data, no op
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
     }
 }

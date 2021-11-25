@@ -44,8 +44,8 @@ impl Location {
         self.current_investments += 1;
     }
 
-    pub fn finish_investment(&mut self, amount: Uint128) -> Result<(), ContractError> {
-        self.current_investments -= 1;
+    pub fn finish_investment(&mut self, amount: Uint128, count: u64) -> Result<(), ContractError> {
+        self.current_investments -= count;
         self.current_invested = self.current_invested.checked_sub(amount)?;
         Ok(())
     }
