@@ -4,13 +4,13 @@ use cosmwasm_std::{
     ensure_eq, from_slice, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Order,
     Response, StdError, StdResult, Uint128,
 };
-use cw2::set_contract_version;
+use cw2::{get_contract_version, set_contract_version};
 use cw20::{Cw20CoinVerified, Cw20Contract, Cw20ExecuteMsg, Cw20ReceiveMsg};
 
 use crate::error::ContractError;
 use crate::msg::{
     ConfigResponse, ExecuteMsg, InfoResponse, InstantiateMsg, InvestmentResponse,
-    ListInvestmentsResponse, OracleValues, QueryMsg, ReceiveMsg,
+    ListInvestmentsResponse, MigrateMsg, OracleValues, QueryMsg, ReceiveMsg,
 };
 use crate::r3::validate_r3;
 use crate::state::{Config, Investment, Location, Measurement, CONFIG, INVESTMENTS, LOCATIONS};
@@ -267,6 +267,22 @@ fn list_investments(
     };
 
     Ok(ListInvestmentsResponse { investments })
+}
+
+// this is useful so we can patch on top.
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
+    let version = get_contract_version(deps.storage)?;
+    ensure_eq!(
+        version.contract,
+        CONTRACT_NAME,
+        ContractError::InvalidMigration
+    );
+    // FIXME: better compare...
+    if version.version.as_str() > CONTRACT_VERSION {
+        return Err(ContractError::InvalidMigration);
+    }
+    Ok(Response::new())
 }
 
 #[cfg(test)]
