@@ -1,4 +1,12 @@
-# Wynd Contracts
+<p align="center">
+  <a href="https://wyndex.io/">
+    <img alt="WYND" src="http://i.epvpimg.com/fjQacab.png" width="250" />
+  </a>
+</p>
+<h1 align="center">
+  Contracts
+</h1>
+
 
 ## Adding a contract
 
