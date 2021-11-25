@@ -272,7 +272,7 @@ fn list_investments(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{Decimal, MemoryStorage, Storage};
+    use cosmwasm_std::{Decimal, MemoryStorage, Storage, SubMsg, WasmMsg};
 
     fn env_at(secs: u64) -> Env {
         let mut env = mock_env();
@@ -595,7 +595,21 @@ mod tests {
             withdraw,
         )
         .unwrap();
-        assert_eq!(res.messages.len(), 1);
+
+        // value doubled, we get 50% out
+        let end_amount = amount * Decimal::percent(50);
+        let expected = Cw20ExecuteMsg::Transfer {
+            recipient: "investor".to_string(),
+            amount: end_amount,
+        };
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(WasmMsg::Execute {
+                contract_addr: "token".to_string(),
+                msg: to_binary(&expected).unwrap(),
+                funds: vec![]
+            })]
+        );
     }
 
     #[test]
