@@ -144,19 +144,20 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
             Vec::with_capacity(invests.len()),
             Uint128::zero(),
             Uint128::zero(),
+            0u64,
         ));
-        let (invests, reward, orig) = invests.into_iter().fold(init, |acc, invest| {
-            let (mut v, total, orig) = acc?;
+        let (invests, reward, orig, count) = invests.into_iter().fold(init, |acc, invest| {
+            let (mut v, total, orig, count) = acc?;
             match invest.reward(&env, &loc, &cfg) {
-                Some(reward) => Ok((v, total + reward, orig + invest.amount)),
+                Some(reward) => Ok((v, total + reward, orig + invest.amount, count + 1)),
                 None => {
                     v.push(invest);
-                    Ok((v, total, orig))
+                    Ok((v, total, orig, count))
                 }
             }
         })?;
         // update location state with the redeemed investments
-        loc.finish_investment(orig)?;
+        loc.finish_investment(orig, count)?;
         // and tally up how much to pay out
         to_withdraw += reward;
 
@@ -272,7 +273,7 @@ fn list_investments(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{Decimal, MemoryStorage, Storage, SubMsg, WasmMsg};
+    use cosmwasm_std::{Decimal, SubMsg, WasmMsg};
 
     fn env_at(secs: u64) -> Env {
         let mut env = mock_env();
@@ -586,6 +587,9 @@ mod tests {
         )
         .unwrap();
 
+        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests.investments.len(), 1);
+
         // now withdrawl works
         let withdraw = ExecuteMsg::Withdraw {};
         let res = execute(
@@ -610,6 +614,20 @@ mod tests {
                 funds: vec![]
             })]
         );
+
+        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        assert_eq!(invests.investments.len(), 0);
+
+        // cannot withdraw again, no investments
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
     }
 
     #[test]
@@ -656,10 +674,6 @@ mod tests {
         )
         .unwrap();
 
-        // we have to copy the storage to "revert" all changes in the failed execution for
-        // properly handling multiple runs
-        let orig_storage = clone_storage(&deps.storage);
-
         // withdraw too early, no op
         let withdraw = ExecuteMsg::Withdraw {};
         let res = execute(
@@ -672,7 +686,6 @@ mod tests {
         assert_eq!(res.messages, vec![]);
 
         // withdraw later, no data, no op
-        deps.storage = clone_storage(&orig_storage);
         let withdraw = ExecuteMsg::Withdraw {};
         let res = execute(
             deps.as_mut(),
@@ -682,13 +695,5 @@ mod tests {
         )
         .unwrap();
         assert_eq!(res.messages, vec![]);
-    }
-
-    fn clone_storage(orig: &MemoryStorage) -> MemoryStorage {
-        let mut new_store = MemoryStorage::new();
-        for (k, v) in orig.range(None, None, Order::Ascending) {
-            new_store.set(&k, &v);
-        }
-        new_store
     }
 }
