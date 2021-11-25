@@ -272,7 +272,7 @@ fn list_investments(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::Decimal;
+    use cosmwasm_std::{Decimal, MemoryStorage, Storage};
 
     fn env_at(secs: u64) -> Env {
         let mut env = mock_env();
@@ -524,5 +524,157 @@ mod tests {
         let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
         assert_eq!(invests.investments.len(), 2);
         assert_eq!(invests.investments, vec![expected, expected2]);
+    }
+
+    #[test]
+    fn withdraw_happy_path() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let location2 = "9362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location, location2]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // oracle info for one
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(200),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // invest there
+        let amount = Uint128::new(808000);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount,
+            msg: to_binary(&payload).unwrap(),
+        });
+        execute(
+            deps.as_mut(),
+            env_at(2 * 86400),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // more oracle data
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(2468),
+                time: time_at(86400 * 31),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400 * 31 + 2000),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // now withdrawl works
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages.len(), 1);
+    }
+
+    #[test]
+    fn withdraw_error_cases() {
+        let mut deps = mock_dependencies();
+
+        let location = "8362718ffffffff";
+        let location2 = "9362718ffffffff";
+        let info = mock_info("creator", &[]);
+        let msg = init_with_locations(&[location, location2]);
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        // oracle info for one
+        let oracle = ExecuteMsg::StoreOracle {
+            values: vec![OracleValues {
+                index: location.to_string(),
+                value: Decimal::percent(1234),
+                time: time_at(200),
+            }],
+        };
+        execute(
+            deps.as_mut(),
+            env_at(86400),
+            mock_info("oracle", &[]),
+            oracle,
+        )
+        .unwrap();
+
+        // invest there
+        let amount = Uint128::new(808000);
+        let payload = ReceiveMsg::Invest {
+            hex: location.to_string(),
+        };
+        let wrapped = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: "investor".to_string(),
+            amount,
+            msg: to_binary(&payload).unwrap(),
+        });
+        execute(
+            deps.as_mut(),
+            env_at(2 * 86400),
+            mock_info("token", &[]),
+            wrapped,
+        )
+        .unwrap();
+
+        // we have to copy the storage to "revert" all changes in the failed execution for
+        // properly handling multiple runs
+        let orig_storage = clone_storage(&deps.storage);
+
+        // withdraw too early, no op
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(22 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
+
+        // withdraw later, no data, no op
+        deps.storage = clone_storage(&orig_storage);
+        let withdraw = ExecuteMsg::Withdraw {};
+        let res = execute(
+            deps.as_mut(),
+            env_at(35 * 86400),
+            mock_info("investor", &[]),
+            withdraw,
+        )
+        .unwrap();
+        assert_eq!(res.messages, vec![]);
+    }
+
+    fn clone_storage(orig: &MemoryStorage) -> MemoryStorage {
+        let mut new_store = MemoryStorage::new();
+        for (k, v) in orig.range(None, None, Order::Ascending) {
+            new_store.set(&k, &v);
+        }
+        new_store
     }
 }
