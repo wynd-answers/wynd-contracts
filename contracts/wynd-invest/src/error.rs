@@ -27,6 +27,9 @@ pub enum ContractError {
     #[error("Last measurement was more than {days} days ago, cannot use")]
     DataTooOld { days: u64 },
 
+    #[error("Cannot migrate from this contract")]
+    InvalidMigration,
+
     // TODO: remove when done
     #[error("Unimplemented")]
     Unimplemented,
