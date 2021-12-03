@@ -134,6 +134,7 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         .collect();
 
     let mut to_withdraw = Uint128::zero();
+    let mut events = Vec::<Event>::new();
 
     for (hex, invests) in investments?.into_iter() {
         let mut loc = LOCATIONS.load(deps.storage, &hex)?;
@@ -149,7 +150,10 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         let (invests, reward, orig, count) = invests.into_iter().fold(init, |acc, invest| {
             let (mut v, total, orig, count) = acc?;
             match invest.reward(&env, &loc, &cfg) {
-                Some(reward) => Ok((v, total + reward, orig + invest.amount, count + 1)),
+                Some(reward) => {
+                    events.push(withdraw_event(&hex, &info.sender, &invest, reward));
+                    Ok((v, total + reward, orig + invest.amount, count + 1))
+                },
                 None => {
                     v.push(invest);
                     Ok((v, total, orig, count))
@@ -173,10 +177,18 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         recipient: info.sender.to_string(),
         amount: to_withdraw,
     })?;
-    let evt = Event::new("withdraw")
+    let evt = Event::new("withdraw-total")
         .add_attribute("amount", to_withdraw.to_string())
         .add_attribute("investor", info.sender);
     Ok(Response::new().add_event(evt).add_message(msg))
+}
+
+pub fn withdraw_event(hex: &str, sender: &Addr, invest: &Investment, reward: Uint128) -> Event {
+    Event::new("withdraw")
+        .add_attribute("invested", invest.amount)
+        .add_attribute("payout", reward)
+        .add_attribute("hex", hex)
+        .add_attribute("investor", sender)
 }
 
 pub fn store_oracle(
