@@ -23,9 +23,12 @@
       "required": [
         "amount",
         "baseline_index",
+        "can_withdraw",
         "hex",
         "invested",
-        "maturity_date"
+        "latest_index",
+        "maturity_date",
+        "withdraw_amount"
       ],
       "properties": {
         "amount": {
@@ -33,6 +36,9 @@
         },
         "baseline_index": {
           "$ref": "#/definitions/Decimal"
+        },
+        "can_withdraw": {
+          "type": "boolean"
         },
         "hex": {
           "type": "string"
@@ -42,10 +48,33 @@
           "format": "uint64",
           "minimum": 0.0
         },
+        "latest_index": {
+          "$ref": "#/definitions/Measurement"
+        },
         "maturity_date": {
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
+        },
+        "withdraw_amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
+    "Measurement": {
+      "type": "object",
+      "required": [
+        "time",
+        "value"
+      ],
+      "properties": {
+        "time": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "value": {
+          "$ref": "#/definitions/Decimal"
         }
       }
     },

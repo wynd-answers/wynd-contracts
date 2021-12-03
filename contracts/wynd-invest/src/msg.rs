@@ -123,7 +123,7 @@ impl InvestmentResponse {
             amount: invest.amount,
             baseline_index: invest.baseline_index,
             // this will always be Some, as we never allow investing if it was None
-            latest_index: loc.cur_index.clone().unwrap(),
+            latest_index: loc.cur_index.unwrap(),
             withdraw_amount,
             can_withdraw,
             invested: invest.invested_time,
