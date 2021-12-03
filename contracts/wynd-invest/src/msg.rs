@@ -100,6 +100,12 @@ pub struct InvestmentResponse {
     pub amount: Uint128,
     // starting value when investment was created
     pub baseline_index: Decimal,
+    // starting value when investment was created
+    pub latest_index: Measurement,
+    // true iff we can withdraw this Investment now
+    pub can_withdraw: bool,
+    // if we withdrew today, how much would we get
+    pub withdraw_amount: Uint128,
     // when this investment was made - in UNIX seconds UTC
     pub invested: u64,
     // when this investment can be claimed - in UNIX seconds UTC
