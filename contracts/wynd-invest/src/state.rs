@@ -51,7 +51,7 @@ impl Location {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default, Copy)]
 pub struct Measurement {
     pub value: Decimal,
     // unix time (UTC) in seconds
@@ -80,6 +80,21 @@ impl Investment {
     /// whether or not this investment has reached maturity date and can be withdrawn
     pub fn is_mature(&self, env: &Env) -> bool {
         env.block.time.seconds() >= self.maturity_time
+    }
+
+    /// calculates what this would return if it was mature and the data was recent enough
+    /// just for displaying in UI.
+    pub fn would_reward(&self, loc: &Location) -> Uint128 {
+        if let Some(measure) = &loc.cur_index {
+            // measurement after maturity, within window
+            // calculate ratio, positive, if measurement below baseline
+            // no code to divide Decimals, so we do this
+            let ratio =
+                Decimal::from_ratio(self.baseline_index.numerator(), measure.value.numerator());
+            self.amount * ratio
+        } else {
+            Uint128::zero()
+        }
     }
 
     /// calculates the reward. if it is not mature, or there is insufficient data
