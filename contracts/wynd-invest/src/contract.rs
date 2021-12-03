@@ -134,6 +134,7 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         .collect();
 
     let mut to_withdraw = Uint128::zero();
+    let mut events = Vec::<Event>::new();
 
     for (hex, invests) in investments?.into_iter() {
         let mut loc = LOCATIONS.load(deps.storage, &hex)?;
@@ -149,7 +150,10 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         let (invests, reward, orig, count) = invests.into_iter().fold(init, |acc, invest| {
             let (mut v, total, orig, count) = acc?;
             match invest.reward(&env, &loc, &cfg) {
-                Some(reward) => Ok((v, total + reward, orig + invest.amount, count + 1)),
+                Some(reward) => {
+                    events.push(withdraw_event(&hex, &info.sender, &invest, reward));
+                    Ok((v, total + reward, orig + invest.amount, count + 1))
+                }
                 None => {
                     v.push(invest);
                     Ok((v, total, orig, count))
@@ -173,10 +177,18 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
         recipient: info.sender.to_string(),
         amount: to_withdraw,
     })?;
-    let evt = Event::new("withdraw")
+    let evt = Event::new("withdraw-total")
         .add_attribute("amount", to_withdraw.to_string())
         .add_attribute("investor", info.sender);
     Ok(Response::new().add_event(evt).add_message(msg))
+}
+
+pub fn withdraw_event(hex: &str, sender: &Addr, invest: &Investment, reward: Uint128) -> Event {
+    Event::new("withdraw")
+        .add_attribute("invested", invest.amount)
+        .add_attribute("payout", reward)
+        .add_attribute("hex", hex)
+        .add_attribute("investor", sender)
 }
 
 pub fn store_oracle(
@@ -209,12 +221,12 @@ pub fn store_oracle(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
         QueryMsg::Config {} => Ok(to_binary(&query_config(deps)?)?),
         QueryMsg::Info { hex } => Ok(to_binary(&query_info(deps, hex)?)?),
         QueryMsg::ListInvestments { investor, hex } => {
-            Ok(to_binary(&list_investments(deps, investor, hex)?)?)
+            Ok(to_binary(&list_investments(deps, env, investor, hex)?)?)
         }
     }
 }
@@ -238,17 +250,20 @@ fn query_info(deps: Deps, hex: String) -> Result<InfoResponse, ContractError> {
 
 fn list_investments(
     deps: Deps,
+    env: Env,
     investor: String,
     hex: Option<String>,
 ) -> Result<ListInvestmentsResponse, ContractError> {
     let hex = hex.map(validate_r3).transpose()?;
     let investor = deps.api.addr_validate(&investor)?;
+    let cfg = CONFIG.load(deps.storage)?;
 
     let investments = if let Some(hex) = hex {
+        let loc = LOCATIONS.load(deps.storage, &hex)?;
         INVESTMENTS
             .load(deps.storage, (&investor, &hex))?
             .into_iter()
-            .map(|inv| InvestmentResponse::new(inv, hex.clone()))
+            .map(|inv| InvestmentResponse::new(inv, &hex, &cfg, &loc, &env))
             .collect()
     } else {
         // all for this investor
@@ -257,9 +272,10 @@ fn list_investments(
             .range(deps.storage, None, None, Order::Ascending)
             .map(|res| {
                 let (hex, invs) = res?;
+                let loc = LOCATIONS.load(deps.storage, &hex)?;
                 Ok(invs
                     .into_iter()
-                    .map(|i| InvestmentResponse::new(i, hex.clone()))
+                    .map(|i| InvestmentResponse::new(i, &hex, &cfg, &loc, &env))
                     .collect())
             })
             .collect();
@@ -480,28 +496,40 @@ mod tests {
         .unwrap();
 
         // check investment
-        let mut invests =
-            list_investments(deps.as_ref(), "investor".into(), Some(location.into())).unwrap();
-        let invests2 = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        let mut invests = list_investments(
+            deps.as_ref(),
+            env_at(6000),
+            "investor".into(),
+            Some(location.into()),
+        )
+        .unwrap();
+        let invests2 =
+            list_investments(deps.as_ref(), env_at(6000), "investor".into(), None).unwrap();
         assert_eq!(invests, invests2);
         assert_eq!(invests.investments.len(), 1);
         let invest = invests.investments.pop().unwrap();
-        let expected = InvestmentResponse {
+        let mut expected = InvestmentResponse {
             hex: location.to_string(),
             amount,
             baseline_index: measurement.value,
+            latest_index: measurement,
+            can_withdraw: false,
+            withdraw_amount: amount,
             invested: time_at(5000),
             maturity_date: time_at(5000 + 28 * 86400),
         };
         assert_eq!(invest, expected);
 
         // update oracle
-        let value2 = Decimal::percent(4321);
+        let measurement2 = Measurement {
+            value: Decimal::percent(4321),
+            time: time_at(86400 + 5000),
+        };
         let oracle = ExecuteMsg::StoreOracle {
             values: vec![OracleValues {
                 index: location.to_string(),
-                value: value2,
-                time: time_at(86400 + 5000),
+                value: measurement2.value,
+                time: measurement2.time,
             }],
         };
         execute(
@@ -530,15 +558,23 @@ mod tests {
         )
         .unwrap();
 
-        // get both
+        // note the first one is updated with new measurement
+        expected.latest_index = measurement2;
+        expected.withdraw_amount = amount * Uint128::new(1234) / Uint128::new(4321);
+
+        // the other one shows original values
         let expected2 = InvestmentResponse {
             hex: location.to_string(),
             amount: amount2,
-            baseline_index: value2,
+            baseline_index: measurement2.value,
+            latest_index: measurement2,
+            can_withdraw: false,
+            withdraw_amount: amount2,
             invested: time_at(2 * 86400),
             maturity_date: time_at(30 * 86400),
         };
-        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        let invests =
+            list_investments(deps.as_ref(), env_at(2 * 86400), "investor".into(), None).unwrap();
         assert_eq!(invests.investments.len(), 2);
         assert_eq!(invests.investments, vec![expected, expected2]);
     }
@@ -603,7 +639,7 @@ mod tests {
         )
         .unwrap();
 
-        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        let invests = list_investments(deps.as_ref(), mock_env(), "investor".into(), None).unwrap();
         assert_eq!(invests.investments.len(), 1);
 
         // now withdrawl works
@@ -631,7 +667,7 @@ mod tests {
             })]
         );
 
-        let invests = list_investments(deps.as_ref(), "investor".into(), None).unwrap();
+        let invests = list_investments(deps.as_ref(), mock_env(), "investor".into(), None).unwrap();
         assert_eq!(invests.investments.len(), 0);
 
         // cannot withdraw again, no investments
