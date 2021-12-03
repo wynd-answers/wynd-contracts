@@ -1,3 +1,3 @@
 4dc65605ff502d18c5fbc6d18138a2437ef63c1e6f4351d8dbe74388f5d48f02  target/wasm32-unknown-unknown/release/wynd_faucet.wasm
-a8eab6fb2701a0910a2c8813dcda0690eb5ccd68cc0c3459a9034a550bb6e0e9  target/wasm32-unknown-unknown/release/wynd_invest.wasm
+6916d0af00b716614c76ab0204aa0f58a67016f47f4daaa716bc2fc2c6cdf653  target/wasm32-unknown-unknown/release/wynd_invest.wasm
 240d21761e6c60b703d58920b51f40fffe7b1d8306a863ef76e20da5fede2aab  target/wasm32-unknown-unknown/release/wynd_oracle.wasm
