@@ -226,6 +226,13 @@ fn process_oracle(deps: DepsMut, env: &Env, val: OracleValues) -> Result<(), Con
     if val.time > env.block.time.seconds() {
         return Err(ContractError::OracleFromTheFuture(val.time));
     }
+    // if oracle is not newer, abort earlier
+    if let Some(cur) = loc.cur_index {
+        if cur.time >= val.time {
+            return Ok(());
+        }
+    }
+    // update stored value
     loc.cur_index = Some(Measurement {
         value: val.value,
         time: val.time,
