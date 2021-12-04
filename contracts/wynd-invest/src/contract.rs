@@ -180,7 +180,8 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     let evt = Event::new("withdraw-total")
         .add_attribute("amount", to_withdraw.to_string())
         .add_attribute("investor", info.sender);
-    Ok(Response::new().add_event(evt).add_message(msg))
+    events.push(evt);
+    Ok(Response::new().add_events(events).add_message(msg))
 }
 
 pub fn withdraw_event(hex: &str, sender: &Addr, invest: &Investment, reward: Uint128) -> Event {
@@ -192,7 +193,7 @@ pub fn withdraw_event(hex: &str, sender: &Addr, invest: &Investment, reward: Uin
 }
 
 pub fn store_oracle(
-    deps: DepsMut,
+    mut deps: DepsMut,
     env: Env,
     info: MessageInfo,
     values: Vec<OracleValues>,
@@ -200,24 +201,44 @@ pub fn store_oracle(
     let config = CONFIG.load(deps.storage)?;
     ensure_eq!(config.oracle, info.sender, ContractError::Unauthorized {});
 
-    let count = values.len();
+    let mut invalid = Vec::<ContractError>::new();
+
+    let mut count = 0;
     for val in values.into_iter() {
-        let hex = validate_r3(val.index)?;
-        let mut loc = LOCATIONS
-            .load(deps.storage, &hex)
-            .map_err(|_| ContractError::UnregisteredLocation(hex.clone()))?;
-        if val.time > env.block.time.seconds() {
-            return Err(ContractError::OracleFromTheFuture(val.time));
+        if let Err(e) = process_oracle(deps.branch(), &env, val) {
+            invalid.push(e);
+        } else {
+            count += 1;
         }
-        loc.cur_index = Some(Measurement {
-            value: val.value,
-            time: val.time,
-        });
-        LOCATIONS.save(deps.storage, &hex, &loc)?;
     }
 
-    let evt = Event::new("oracle").add_attribute("count", count.to_string());
+    let evt = Event::new("oracle")
+        .add_attribute("succeeded", count.to_string())
+        .add_attributes(invalid.into_iter().map(|e| ("failed", e.to_string())));
     Ok(Response::new().add_event(evt))
+}
+
+fn process_oracle(deps: DepsMut, env: &Env, val: OracleValues) -> Result<(), ContractError> {
+    let hex = validate_r3(val.index)?;
+    let mut loc = LOCATIONS
+        .load(deps.storage, &hex)
+        .map_err(|_| ContractError::UnregisteredLocation(hex.clone()))?;
+    if val.time > env.block.time.seconds() {
+        return Err(ContractError::OracleFromTheFuture(val.time));
+    }
+    // if oracle is not newer, abort earlier
+    if let Some(cur) = loc.cur_index {
+        if cur.time >= val.time {
+            return Ok(());
+        }
+    }
+    // update stored value
+    loc.cur_index = Some(Measurement {
+        value: val.value,
+        time: val.time,
+    });
+    LOCATIONS.save(deps.storage, &hex, &loc)?;
+    Ok(())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -387,15 +408,25 @@ mod tests {
             }],
         };
 
-        // fail if in the future
-        let err = execute(
+        // error message if from the future
+        let res = execute(
             deps.as_mut(),
             mock_env(),
             mock_info("oracle", &[]),
             msg.clone(),
         )
-        .unwrap_err();
-        assert_eq!(err, ContractError::OracleFromTheFuture(time_at(20)));
+        .unwrap();
+        assert_eq!(res.events.len(), 1);
+        assert_eq!(res.events[0].ty, "oracle");
+        let attrs = &res.events[0].attributes;
+        assert_eq!(attrs[0], ("succeeded", "0"));
+        assert_eq!(
+            attrs[1],
+            (
+                "failed",
+                ContractError::OracleFromTheFuture(time_at(20)).to_string()
+            )
+        );
 
         // fail if not oracle
         let err = execute(
@@ -419,7 +450,7 @@ mod tests {
         });
         assert_eq!(info, expected);
 
-        // reject bad location
+        // ignore bad location
         let msg = ExecuteMsg::StoreOracle {
             values: vec![OracleValues {
                 index: "9362718FFffffff".to_string(),
@@ -427,10 +458,17 @@ mod tests {
                 time: time_at(20),
             }],
         };
-        let err = execute(deps.as_mut(), env_at(1234), mock_info("oracle", &[]), msg).unwrap_err();
+        let res = execute(deps.as_mut(), env_at(1234), mock_info("oracle", &[]), msg).unwrap();
+        assert_eq!(res.events.len(), 1);
+        assert_eq!(res.events[0].ty, "oracle");
+        let attrs = &res.events[0].attributes;
+        assert_eq!(attrs[0], ("succeeded", "0"));
         assert_eq!(
-            err,
-            ContractError::UnregisteredLocation("9362718ffffffff".to_string())
+            attrs[1],
+            (
+                "failed",
+                ContractError::UnregisteredLocation("9362718ffffffff".to_string()).to_string()
+            )
         );
     }
 
