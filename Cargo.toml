@@ -5,6 +5,10 @@ members = ["packages/*", "contracts/*"]
 codegen-units = 1
 incremental = false
 
+[profile.release.package.wynd-invest]
+codegen-units = 1
+incremental = false
+
 [profile.release.package.wynd-oracle]
 codegen-units = 1
 incremental = false
