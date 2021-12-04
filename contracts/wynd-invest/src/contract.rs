@@ -180,7 +180,8 @@ pub fn withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     let evt = Event::new("withdraw-total")
         .add_attribute("amount", to_withdraw.to_string())
         .add_attribute("investor", info.sender);
-    Ok(Response::new().add_event(evt).add_message(msg))
+    events.push(evt);
+    Ok(Response::new().add_events(events).add_message(msg))
 }
 
 pub fn withdraw_event(hex: &str, sender: &Addr, invest: &Investment, reward: Uint128) -> Event {
