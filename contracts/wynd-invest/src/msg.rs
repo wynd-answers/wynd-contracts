@@ -30,9 +30,15 @@ pub struct MigrateMsg {}
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
-    // this will return funds from all finished investments
+    /// This will return funds from all finished investments
     Withdraw {},
-    StoreOracle { values: Vec<OracleValues> },
+    StoreOracle {
+        values: Vec<OracleValues>,
+    },
+    /// The current oracle can designate a new oracle
+    UpdateOracle {
+        oracle: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]

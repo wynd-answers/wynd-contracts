@@ -57,6 +57,7 @@ pub fn execute(
         ExecuteMsg::Receive(msg) => receive(deps, env, info, msg),
         ExecuteMsg::Withdraw {} => withdraw(deps, env, info),
         ExecuteMsg::StoreOracle { values } => store_oracle(deps, env, info, values),
+        ExecuteMsg::UpdateOracle { oracle } => update_oracle(deps, env, info, oracle),
     }
 }
 
@@ -239,6 +240,23 @@ fn process_oracle(deps: DepsMut, env: &Env, val: OracleValues) -> Result<(), Con
     });
     LOCATIONS.save(deps.storage, &hex, &loc)?;
     Ok(())
+}
+
+pub fn update_oracle(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    raw_oracle: String,
+) -> Result<Response, ContractError> {
+    let oracle = deps.api.addr_validate(&raw_oracle)?;
+
+    let mut cfg = CONFIG.load(deps.storage)?;
+    ensure_eq!(cfg.oracle, info.sender, ContractError::Unauthorized {});
+    cfg.oracle = oracle;
+    CONFIG.save(deps.storage, &cfg)?;
+
+    let evt = Event::new("update-oracle").add_attribute("oracle", raw_oracle);
+    Ok(Response::new().add_event(evt))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
